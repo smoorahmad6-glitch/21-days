@@ -97,7 +97,7 @@ const App: React.FC = () => {
       {/* Navbar */}
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="font-black text-xl text-emerald-600 flex items-center gap-2" onClick={() => setView(data ? 'DASHBOARD' : 'HOME')}>
+          <div className="font-black text-xl text-emerald-600 flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setView(data ? 'DASHBOARD' : 'HOME')}>
             <span>21</span>
             <span className="text-slate-800">Challenges</span>
           </div>
@@ -105,9 +105,14 @@ const App: React.FC = () => {
           <div>
             {session ? (
               <div className="flex items-center gap-3">
-                 <div className="hidden sm:flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
-                    <Cloud className="w-3 h-3" />
-                    <span>متصل</span>
+                 <div className="hidden sm:flex flex-col items-end mr-2">
+                    <span className="text-xs font-bold text-slate-700">
+                      {session.user.user_metadata?.full_name || session.user.email?.split('@')[0]}
+                    </span>
+                    <div className="flex items-center gap-1 text-[10px] text-emerald-600">
+                       <Cloud className="w-3 h-3" />
+                       <span>محفوظ سحابياً</span>
+                    </div>
                  </div>
                  <button 
                    onClick={handleLogout}
@@ -120,10 +125,10 @@ const App: React.FC = () => {
             ) : (
               <button 
                 onClick={() => setShowAuthModal(true)}
-                className="flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-emerald-600 transition-colors"
+                className="flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-slate-50 hover:bg-emerald-50 px-4 py-2 rounded-full"
               >
-                <span>دخول</span>
-                <UserCircle className="w-6 h-6" />
+                <span>حفظ التقدم</span>
+                <UserCircle className="w-5 h-5" />
               </button>
             )}
           </div>
