@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { Button } from './Button';
-import { X, Mail, Loader2, Cloud, CheckCircle2, Lock, Eye, EyeOff, KeyRound, ArrowRight, AlertCircle, RefreshCw, HelpCircle } from 'lucide-react';
+import { X, Mail, Loader2, Cloud, CheckCircle2, Lock, Eye, EyeOff, KeyRound, ArrowRight, AlertCircle, RefreshCw, HelpCircle, Timer } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -19,6 +19,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
+  
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Timer for cooldown
+  useEffect(() => {
+    let timer: any;
+    if (resendCooldown > 0) {
+      timer = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   if (!isOpen) return null;
 
@@ -38,8 +49,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         onClose();
       } else {
         // Signup Flow
-        // This triggers the "Confirm Your Email" template in Supabase.
-        // You MUST change that template in Supabase Dashboard to send {{ .Token }} instead of a link.
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -48,13 +57,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         if (error) throw error;
         
         if (data.user && !data.session) {
+          // IMPORTANT: Explicitly trigger signInWithOtp to ensure a code is sent via the "Magic Link" channel
+          // This acts as a backup if the "Confirm Email" template fails or is link-only.
+          // Note: The user might receive 2 emails, but better than 0.
+          await supabase.auth.signInWithOtp({
+             email,
+             options: { shouldCreateUser: false }
+          });
+
           setStep('verify');
+          setResendCooldown(60); // Start cooldown immediately
           setMessage({ 
             type: 'info', 
-            text: 'تم إرسال رمز التفعيل إلى بريدك الإلكتروني.' 
+            text: 'تم إرسال رمز التحقق. (إذا لم تجده، تحقق من البريد العشوائي Spam).' 
           });
         } else if (data.session) {
-          onClose(); // Auto logged in (if email confirmation is disabled)
+          onClose(); // Auto logged in
         }
       }
     } catch (error: any) {
@@ -71,33 +89,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setMessage(null);
 
     try {
-      // For new signups, we verify the 'signup' token.
-      const { data, error } = await supabase.auth.verifyOtp({
+      // Try verifying as 'email' (Magic Link OTP) first - most common for signInWithOtp
+      let { data, error } = await supabase.auth.verifyOtp({
         email,
         token: otp,
-        type: 'signup', // Explicitly verify signup code
+        type: 'email', 
       });
 
       if (error) {
-        // Fallback: If user clicked "Resend" generically, it might be an 'email' (magic link) code
-        const fallback = await supabase.auth.verifyOtp({
+        // If failed, try verifying as 'signup' (Confirmation Code)
+        const secondAttempt = await supabase.auth.verifyOtp({
           email,
           token: otp,
-          type: 'email',
+          type: 'signup',
         });
         
-        if (fallback.error) throw error; // Throw original error if fallback also fails
-        
-        if (fallback.data.session) {
-           finishLogin();
-           return;
+        if (secondAttempt.error) {
+           throw error; // Throw original error if both fail
         }
+        data = secondAttempt.data;
       }
 
       if (data?.session) {
         finishLogin();
       } else {
-        // Sometimes user is verified but not logged in automatically
+        // Just in case session isn't established automatically
         const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
         if (loginError) throw loginError;
         finishLogin();
@@ -116,24 +132,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleResendCode = async () => {
+    if (resendCooldown > 0) return;
+    
     setLoading(true);
     setMessage(null);
     try {
-      // Resend the signup confirmation email
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
+      // Use signInWithOtp for resend as it's the most reliable way to trigger a "Magic Code"
+      const { error } = await supabase.auth.signInWithOtp({
         email,
+        options: { shouldCreateUser: false }
       });
       
       if (error) throw error;
-      setMessage({ type: 'success', text: 'تم إعادة إرسال رمز التفعيل' });
+      
+      setResendCooldown(60);
+      setMessage({ type: 'success', text: 'تم إرسال رمز جديد. تفقد البريد والـ Spam.' });
     } catch (error: any) {
-      // Fallback: try sending a generic OTP if signup resend isn't allowed
-      try {
-        await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: false }});
-        setMessage({ type: 'success', text: 'تم إرسال رمز جديد' });
-      } catch (e) {
-        setMessage({ type: 'error', text: 'يرجى الانتظار دقيقة قبل المحاولة مرة أخرى' });
+      if (error.message?.includes('rate limit')) {
+         setMessage({ type: 'error', text: 'تجاوزت الحد المسموح. يرجى الانتظار قليلاً.' });
+         setResendCooldown(60);
+      } else {
+         setMessage({ type: 'error', text: 'حدث خطأ في الإرسال. حاول لاحقاً.' });
       }
     } finally {
       setLoading(false);
@@ -145,7 +164,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     if (error.message.includes('Invalid login credentials')) errorMsg = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
     else if (error.message.includes('User already registered')) errorMsg = 'هذا البريد مسجل مسبقاً، حاول تسجيل الدخول';
     else if (error.message.includes('Password')) errorMsg = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
-    else if (error.message.includes('security purposes')) errorMsg = 'يرجى الانتظار دقيقة قبل المحاولة مرة أخرى';
+    else if (error.message.includes('security purposes') || error.message.includes('rate limit')) errorMsg = 'يرجى الانتظار دقيقة قبل المحاولة مرة أخرى (Rate Limit)';
     else errorMsg = error.message;
     setMessage({ type: 'error', text: errorMsg });
   };
@@ -170,6 +189,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setStep('form');
     setMessage(null);
     setOtp('');
+    setResendCooldown(0);
   };
 
   return (
@@ -195,7 +215,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </h2>
           <p className="text-slate-500 text-center mb-6 text-sm max-w-xs leading-relaxed">
             {step === 'verify' 
-              ? `أدخل رمز التفعيل الذي تم إرساله إلى ${email}`
+              ? `تم إرسال الرمز إلى ${email}`
               : (mode === 'login' ? 'مرحباً بعودتك! أكمل رحلة التحدي.' : 'سجل بريدك وكلمة المرور للبدء.')}
           </p>
         </div>
@@ -330,11 +350,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 <button
                   type="button"
                   onClick={handleResendCode}
-                  disabled={loading}
-                  className="flex items-center gap-1 text-sm text-slate-500 hover:text-emerald-600 transition-colors"
+                  disabled={loading || resendCooldown > 0}
+                  className={`flex items-center gap-1 text-sm transition-colors ${
+                    resendCooldown > 0 ? 'text-slate-300' : 'text-slate-500 hover:text-emerald-600'
+                  }`}
                 >
-                  <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-                  <span>لم يصلك الكود؟ إعادة الإرسال</span>
+                  {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  <span>
+                    {resendCooldown > 0 
+                      ? `إعادة الإرسال بعد ${resendCooldown} ثانية` 
+                      : 'لم يصلك الكود؟ إعادة الإرسال'
+                    }
+                  </span>
                 </button>
                 
                 <button
