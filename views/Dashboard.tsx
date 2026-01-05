@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { ChallengeData, DailyQuote } from '../types';
+import React from 'react';
+import { ChallengeData } from '../types';
 import { TOTAL_DAYS, FALLBACK_QUOTES } from '../constants';
 import { Button } from '../components/Button';
 import { CheckCircle2, Circle, Lock, Share2, RefreshCw, PartyPopper, Sparkles } from 'lucide-react';
-import { getPersonalizedMotivation } from '../services/geminiService';
 
 interface DashboardProps {
   data: ChallengeData;
@@ -12,9 +11,6 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ data, onUpdate, onRestart }) => {
-  const [quote, setQuote] = useState<DailyQuote>(FALLBACK_QUOTES[0]);
-  const [loadingQuote, setLoadingQuote] = useState(false);
-
   // Calculate stats
   const completedCount = data.completedDays.length;
   const progress = Math.round((completedCount / TOTAL_DAYS) * 100);
@@ -23,33 +19,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onUpdate, onRestart 
   const currentDay = completedCount + 1;
   const isFinished = completedCount >= TOTAL_DAYS;
 
-  useEffect(() => {
-    const fetchMotivation = async () => {
-      // Only fetch if we have an API key and it's a new interaction or day load
-      if (process.env.API_KEY && !isFinished) {
-        setLoadingQuote(true);
-        const text = await getPersonalizedMotivation(data.habitName, currentDay);
-        if (text) {
-          setQuote({ text });
-        } else {
-           // Fallback rotation
-           setQuote(FALLBACK_QUOTES[completedCount % FALLBACK_QUOTES.length]);
-        }
-        setLoadingQuote(false);
-      } else {
-          setQuote(FALLBACK_QUOTES[completedCount % FALLBACK_QUOTES.length]);
-      }
-    };
-
-    fetchMotivation();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completedCount, data.habitName, isFinished]);
-
+  // Get quote based on day index (rotates if days > quotes)
+  const quote = FALLBACK_QUOTES[completedCount % FALLBACK_QUOTES.length];
 
   const handleCheckDay = (day: number) => {
     if (data.completedDays.includes(day)) return; // Already done
     
-    // Only allow checking the current sequence day (or previous days if missed, though simplistic model assumes linear)
+    // Only allow checking the current sequence day (or previous days if missed)
     // For flexibility, let's allow checking the immediate next day.
     if (day !== currentDay && day > currentDay) return;
 
@@ -144,7 +120,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onUpdate, onRestart 
             <Sparkles className="w-5 h-5 text-yellow-300 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-light leading-relaxed">
-                {loadingQuote ? 'جاري تحضير رسالة اليوم...' : `"${quote.text}"`}
+                "{quote.text}"
               </p>
             </div>
           </div>
